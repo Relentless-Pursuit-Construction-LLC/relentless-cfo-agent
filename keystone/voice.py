@@ -16,12 +16,15 @@ from anthropic import Anthropic
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = os.environ.get("KEYSTONE_MODEL", "claude-opus-4-5")
 
-# Path to system prompt — relative to repo root in dev, /app in Railway container
+# Paths to persona + knowledge files — relative to repo root in dev, /app in Railway
 _HERE = Path(__file__).resolve().parent.parent
 SYSTEM_PROMPT_PATH = _HERE / "docs" / "KEYSTONE_SYSTEM_PROMPT.md"
+KNOWLEDGE_PATH = _HERE / "docs" / "KEYSTONE_KNOWLEDGE.md"
+KNOWLEDGE_INDEX_PATH = _HERE / "docs" / "KEYSTONE_KNOWLEDGE_INDEX.md"
 
 _client: Anthropic | None = None
 _system_prompt: str | None = None
+_knowledge: str | None = None
 
 
 def _get_client() -> Anthropic:
@@ -45,6 +48,38 @@ def get_system_prompt() -> str:
     return _system_prompt
 
 
+def get_knowledge() -> str:
+    """Load Matt's institutional-memory knowledge file.
+
+    This is the file Matt edits via GitHub to teach Keystone what's normal
+    vs anomalous for Relentless. Loaded into every Claude call alongside the
+    system prompt so Keystone's interpretations are calibrated to actual
+    Relentless patterns instead of generic trade-business defaults.
+    """
+    global _knowledge
+    if _knowledge is None:
+        parts = []
+        if KNOWLEDGE_PATH.exists():
+            parts.append("# Relentless-specific Knowledge (Matt's institutional memory)\n\n")
+            parts.append(KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+        if KNOWLEDGE_INDEX_PATH.exists():
+            parts.append("\n\n# Keystone framework index\n\n")
+            parts.append(KNOWLEDGE_INDEX_PATH.read_text(encoding="utf-8"))
+        _knowledge = "".join(parts) if parts else ""
+    return _knowledge
+
+
+def reload_persona() -> None:
+    """Bust the in-memory cache so next call re-reads from disk.
+
+    Useful after Matt commits a knowledge update — call via an admin endpoint
+    or just on container restart (Railway redeploys auto-reload on push).
+    """
+    global _system_prompt, _knowledge
+    _system_prompt = None
+    _knowledge = None
+
+
 def speak(
     task_brief: str,
     data: dict[str, Any] | None = None,
@@ -57,7 +92,11 @@ def speak(
     audience: "josh" | "matt" | "joanne" — controls voice translation
     """
     client = _get_client()
-    system = get_system_prompt()
+    system_parts = [get_system_prompt()]
+    knowledge = get_knowledge()
+    if knowledge:
+        system_parts.append("\n\n---\n\n" + knowledge)
+    system = "".join(system_parts)
 
     user_msg = (
         f"# Task\n{task_brief}\n\n"

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets (never commit)
+secrets/
+*.pem
+*.key
+qbo_tokens.json
+
+# Logs
+*.log
+logs/
+
+# Build / dist
+dist/
+build/
+*.egg-info/

@@ -1,12 +1,16 @@
 """Keystone — FastAPI entrypoint.
 
-Three job surfaces:
+Endpoint surface:
   GET  /health                  — liveness probe
+  GET  /qbo/connect             — start OAuth (Josh navigates here once, query-secret gated)
+  GET  /qbo/callback            — Intuit redirects here with auth code
+  POST /admin/sanity-pull       — manual QBO sanity check (Bearer-gated)
   POST /cron/ar-aging-digest    — AR digest (Mon-Sat 6:30 AM MT)
   POST /cron/pulse              — daily cash heartbeat
-  POST /admin/sanity-pull       — manual QBO sanity check (auth-gated)
 
-Admin endpoints are gated by ADMIN_SECRET (Bearer token).
+Admin/cron endpoints are gated by ADMIN_SECRET (Bearer token).
+The /qbo/connect endpoint accepts the secret as a query parameter so Josh can
+hit it from a browser (one-time only).
 """
 
 from __future__ import annotations
@@ -15,11 +19,16 @@ import os
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-from keystone import qbo
+from keystone import qbo, qbo_oauth
 
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+PUBLIC_BASE_URL = os.environ.get(
+    "PUBLIC_BASE_URL", "https://cfo-agent-production-3b9e.up.railway.app"
+)
+QBO_REDIRECT_URI = f"{PUBLIC_BASE_URL}/qbo/callback"
 
 app = FastAPI(title="Keystone — Relentless CFO Agent", version="0.1.0")
 
@@ -41,6 +50,62 @@ def health() -> dict[str, Any]:
         "service": "keystone",
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
+
+
+@app.get("/qbo/connect")
+def qbo_connect(secret: str = Query(default="")) -> RedirectResponse:
+    """Start the QBO OAuth dance. Josh hits this URL once with ?secret=<ADMIN_SECRET>.
+
+    Redirects to Intuit's authorize URL. Intuit will redirect back to /qbo/callback.
+    """
+    if not ADMIN_SECRET:
+        raise HTTPException(503, "ADMIN_SECRET not configured")
+    if secret != ADMIN_SECRET:
+        raise HTTPException(403, "Invalid secret")
+    auth_url = qbo_oauth.build_authorize_url(QBO_REDIRECT_URI)
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
+@app.get("/qbo/callback")
+def qbo_callback(
+    code: str = Query(default=""),
+    realmId: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+) -> HTMLResponse:
+    """Intuit's redirect target. Exchanges the auth code for tokens."""
+    if error:
+        return HTMLResponse(
+            f"<h1>QBO authorization failed</h1><p>Error: {error}</p>",
+            status_code=400,
+        )
+    if not code or not realmId or not state:
+        return HTMLResponse(
+            "<h1>Missing code / realmId / state</h1>", status_code=400
+        )
+    if not qbo_oauth.consume_state(state):
+        return HTMLResponse(
+            "<h1>Invalid or expired state</h1><p>Restart from /qbo/connect.</p>",
+            status_code=400,
+        )
+
+    try:
+        result = qbo_oauth.exchange_code_for_tokens(code, realmId, QBO_REDIRECT_URI)
+    except Exception as e:
+        return HTMLResponse(
+            f"<h1>Token exchange failed</h1><pre>{e}</pre>", status_code=500
+        )
+
+    return HTMLResponse(
+        f"""
+        <h1>Keystone is connected to QuickBooks.</h1>
+        <p><strong>Realm ID:</strong> {result['realm_id']}</p>
+        <p><strong>Refresh token valid until:</strong> {datetime.utcfromtimestamp(result['x_refresh_token_expires_at']).isoformat()}Z</p>
+        <p>You can close this tab. Keystone will refresh the access token automatically.</p>
+        <p>Next step: hit <code>/admin/sanity-pull</code> with your Bearer token to validate data access.</p>
+        """,
+        status_code=200,
+    )
 
 
 @app.post("/admin/sanity-pull")

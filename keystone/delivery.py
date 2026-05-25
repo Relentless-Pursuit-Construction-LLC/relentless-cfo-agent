@@ -37,16 +37,32 @@ AUDIENCE_MAP = {
     "finance": FINANCE_SLACK_ID,
 }
 
+# Soft-launch gate: restricts EVERY delivery to this whitelist of symbolic names.
+# Default: just Josh, until he explicitly loops in Matt + Joanne.
+# Set env var KEYSTONE_AUDIENCE="josh,matt" or "josh,matt,joanne" to expand.
+_ALLOWED_NAMES = {
+    n.strip().lower()
+    for n in os.environ.get("KEYSTONE_AUDIENCE", "josh").split(",")
+    if n.strip()
+}
+
 # Counsel splitting threshold — Slack allows 40K chars per msg but readability
 # breaks at long ones; split on section headers when over this.
 CHUNK_MAX = 3_500
 
 
 def _resolve_audience(names: list[str]) -> list[str]:
-    """Translate symbolic names ('josh', 'matt') to Slack IDs. Drops empties."""
+    """Translate symbolic names ('josh', 'matt') to Slack IDs.
+
+    Applies the soft-launch gate — if KEYSTONE_AUDIENCE env var is set, only
+    names in that whitelist actually deliver. Empty IDs are dropped.
+    """
     out: list[str] = []
     for n in names:
-        slack_id = AUDIENCE_MAP.get(n.lower())
+        n_lower = n.lower()
+        if n_lower not in _ALLOWED_NAMES:
+            continue
+        slack_id = AUDIENCE_MAP.get(n_lower)
         if slack_id:
             out.append(slack_id)
     return out

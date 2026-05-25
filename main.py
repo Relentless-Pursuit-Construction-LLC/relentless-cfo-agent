@@ -6,7 +6,10 @@ Endpoint surface:
   GET  /qbo/callback            — Intuit redirects here with auth code
   POST /admin/sanity-pull       — manual QBO sanity check (Bearer-gated)
   POST /cron/ar-aging-digest    — AR digest (Mon-Sat 6:30 AM MT)
-  POST /cron/pulse              — daily cash heartbeat
+  POST /cron/pulse              — daily cash heartbeat (6:32 AM MT daily)
+  POST /cron/watch              — hourly anomaly sweep (6 AM – 10 PM MT)
+  POST /cron/audit              — weekly audit (Mon 7:00 AM MT)
+  POST /cron/counsel            — monthly walkthrough (5th of month 7:00 AM MT)
 
 Admin/cron endpoints are gated by ADMIN_SECRET (Bearer token).
 The /qbo/connect endpoint accepts the secret as a query parameter so Josh can
@@ -164,3 +167,27 @@ def cron_pulse(authorization: str | None = Header(default=None)) -> dict[str, An
     from keystone.jobs.pulse import run_pulse
 
     return run_pulse()
+
+
+@app.post("/cron/watch")
+def cron_watch(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_admin(authorization)
+    from keystone.jobs.watch import run_watch
+
+    return run_watch()
+
+
+@app.post("/cron/audit")
+def cron_audit(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_admin(authorization)
+    from keystone.jobs.audit import run_audit
+
+    return run_audit()
+
+
+@app.post("/cron/counsel")
+def cron_counsel(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_admin(authorization)
+    from keystone.jobs.counsel import run_counsel
+
+    return run_counsel()

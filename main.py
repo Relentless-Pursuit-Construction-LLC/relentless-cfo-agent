@@ -111,6 +111,35 @@ def qbo_callback(
     )
 
 
+@app.post("/admin/slack-whoami")
+def slack_whoami(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Diagnostic: returns which Slack bot identity is wired in the live container.
+
+    Calls Slack's auth.test using the SLACK_BOT_TOKEN env var the container
+    sees right now. If the result says 'lighthouse' instead of 'keystone',
+    the env var wasn't actually updated despite Railway tooling claims.
+    """
+    _require_admin(authorization)
+    import httpx
+
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        return {"ok": False, "error": "SLACK_BOT_TOKEN env var is empty in this container"}
+
+    resp = httpx.post(
+        "https://slack.com/api/auth.test",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10.0,
+    )
+    payload = resp.json()
+    return {
+        "container_token_first_30": token[:30],
+        "container_token_last_10": token[-10:],
+        "container_token_len": len(token),
+        "slack_auth_test": payload,
+    }
+
+
 @app.post("/admin/sanity-pull")
 def sanity_pull(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Validate QBO plumbing: pull company info + balance sheet + AR summary."""

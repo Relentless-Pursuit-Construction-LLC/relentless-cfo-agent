@@ -111,6 +111,29 @@ def qbo_callback(
     )
 
 
+@app.post("/admin/signing-secret-check")
+def signing_secret_check(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Diagnostic: confirms whether SLACK_SIGNING_SECRET is loaded in the container,
+    and returns its first 4 / last 4 chars so Josh can compare against the value
+    in api.slack.com/apps -> Keystone -> Basic Information -> Signing Secret.
+    """
+    _require_admin(authorization)
+    secret = os.environ.get("SLACK_SIGNING_SECRET", "")
+    return {
+        "is_set": bool(secret),
+        "length": len(secret),
+        "first_4": secret[:4] if secret else "",
+        "last_4": secret[-4:] if secret else "",
+        "expected_length": 32,
+        "expected_pattern": "32-char lowercase hex",
+        "hint": (
+            "If first_4/last_4 don't match what you see in Slack, you copied "
+            "the wrong field. The right one is labeled 'Signing Secret' "
+            "(NOT Client Secret, NOT Verification Token)."
+        ),
+    }
+
+
 @app.post("/admin/slack-whoami")
 def slack_whoami(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Diagnostic: returns which Slack bot identity is wired in the live container.

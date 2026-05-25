@@ -22,10 +22,10 @@ import os
 from datetime import datetime
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from keystone import delivery, qbo, qbo_oauth
+from keystone import delivery, qbo, qbo_oauth, slack_verify
 
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get(
@@ -255,3 +255,121 @@ def cron_counsel(
     if no_deliver:
         return {**result, "delivery": "skipped (no_deliver=true)"}
     return {**result, "delivery": delivery.deliver_counsel(result)}
+
+
+# --- Slack events: conversational Q&A -------------------------------------
+
+
+@app.post("/slack/events")
+async def slack_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_slack_signature: str | None = Header(default=None),
+    x_slack_request_timestamp: str | None = Header(default=None),
+) -> Response:
+    """Slack Events API webhook.
+
+    Handles three event types:
+      - url_verification: handshake; echo the challenge.
+      - event_callback / message (channel_type=im): DM to Keystone.
+      - event_callback / app_mention: @Keystone in a channel.
+
+    We verify the Slack signature, dedup retried events, allowlist the user,
+    ACK fast (Slack requires <3s), and process the message in a background
+    task so the Claude call doesn't block the webhook response.
+    """
+    import logging
+
+    logger = logging.getLogger("keystone.slack_events")
+
+    body_bytes = await request.body()
+
+    # 1) Signature verification (skippable only via KEYSTONE_SKIP_SLACK_VERIFY).
+    if slack_verify.signature_verification_enabled():
+        ok, reason = slack_verify.verify_slack_signature(
+            body_bytes, x_slack_request_timestamp, x_slack_signature
+        )
+        if not ok:
+            logger.warning("Rejecting Slack request: %s", reason)
+            raise HTTPException(401, f"signature check failed: {reason}")
+
+    # 2) Parse payload.
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "invalid JSON body")
+
+    payload_type = payload.get("type")
+
+    # 3) URL verification handshake — echo the challenge back.
+    if payload_type == "url_verification":
+        return JSONResponse({"challenge": payload.get("challenge", "")})
+
+    # 4) Event callback — dedup, then route by inner event type.
+    if payload_type == "event_callback":
+        event_id = payload.get("event_id")
+        if slack_verify.is_duplicate_event(event_id):
+            logger.info("Dropping duplicate Slack event %s", event_id)
+            return Response(status_code=200)
+
+        event = payload.get("event") or {}
+        event_type = event.get("type")
+        user_id = event.get("user")
+        channel = event.get("channel", "")
+        text = event.get("text", "")
+        thread_ts = event.get("thread_ts")  # Only set when already in a thread
+
+        # Ignore the bot's own messages + edits + bot-authored events.
+        if event.get("bot_id") or event.get("subtype") == "bot_message":
+            return Response(status_code=200)
+
+        # Allowlist check — drop anyone who isn't Josh/Matt (or the configured set).
+        if not slack_verify.is_user_allowed(user_id):
+            logger.info(
+                "Ignoring Slack event from non-allowlisted user user_id=%s type=%s",
+                user_id,
+                event_type,
+            )
+            return Response(status_code=200)
+
+        # DM to the bot.
+        if event_type == "message" and event.get("channel_type") == "im":
+            background_tasks.add_task(
+                _process_slack_qa, user_id, channel, text, None
+            )
+            return Response(status_code=200)
+
+        # @mention in a channel — reply in-thread.
+        if event_type == "app_mention":
+            # Use event_ts as the thread anchor if we're not already in a thread.
+            anchor = thread_ts or event.get("ts")
+            background_tasks.add_task(
+                _process_slack_qa, user_id, channel, text, anchor
+            )
+            return Response(status_code=200)
+
+        # Anything else (e.g. message.channels we didn't subscribe to) — ack.
+        return Response(status_code=200)
+
+    # Unknown top-level type — ACK so Slack doesn't retry forever.
+    return Response(status_code=200)
+
+
+def _process_slack_qa(
+    user_id: str, channel: str, text: str, thread_ts: str | None
+) -> None:
+    """Background task wrapper — keeps the import lazy so the webhook handler
+    stays fast on cold-start and any import-time error in qa.py gets logged
+    instead of crashing the webhook ACK.
+    """
+    import logging
+
+    logger = logging.getLogger("keystone.slack_events")
+    try:
+        from keystone import qa
+
+        qa.process_message(user_id, channel, text, thread_ts)
+    except Exception:
+        logger.exception(
+            "Q&A background task failed for user=%s channel=%s", user_id, channel
+        )

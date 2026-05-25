@@ -467,6 +467,39 @@ def _rule_cash_swing(_tx: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]
     return None
 
 
+def _rule_individual_account_negative(_tx: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any] | None:
+    """Flag any individual bank account with a negative balance.
+
+    Aggregate operating cash can be positive while a single account is overdrawn.
+    Real example from 2026-05-25: PERFBUS CHK was -$8,852 while total cash was $109K.
+    This rule catches that — _rule_negative_cash and _rule_cash_below_floor would miss it.
+
+    Marked CRITICAL because an overdrawn account triggers bank fees + signals
+    cash management issue. Surfaces every negative account in a single finding.
+    """
+    accounts = ctx.get("cash_accounts") or []
+    negatives = [a for a in accounts if isinstance(a, dict) and (a.get("balance") or 0) < 0]
+    if not negatives:
+        return None
+    lines = [
+        f"  - {a.get('name', 'unknown')}: ${a.get('balance', 0):,.2f}"
+        for a in negatives
+    ]
+    return {
+        "severity": "critical",
+        "type": "individual_account_negative",
+        "details": {
+            "negative_accounts": negatives,
+            "count": len(negatives),
+        },
+        "message": (
+            f"{len(negatives)} bank account(s) overdrawn:\n"
+            + "\n".join(lines)
+            + "\n\nReview with Matt today. Overdraft fees + sequencing risk."
+        ),
+    }
+
+
 # Per-transaction rules — order does not matter; we collect all matches.
 _RULES: list[Callable[[dict[str, Any], dict[str, Any]], dict[str, Any] | None]] = [
     _rule_nsf,
@@ -551,6 +584,21 @@ def _fetch_operating_cash() -> float | None:
     return total if found else None
 
 
+def _fetch_individual_cash_accounts() -> list[dict[str, Any]]:
+    """Return per-account bank balances. Reuses Pulse's BalanceSheet walker.
+
+    Returns list of {name, balance} dicts. Empty list on failure (so the rule
+    that consumes it becomes a no-op rather than firing false positives).
+    """
+    try:
+        from keystone.jobs.pulse import extract_cash_position
+        bs = qbo.get_balance_sheet()
+        cash_info = extract_cash_position(bs)
+        return cash_info.get("accounts") or []
+    except Exception:
+        return []
+
+
 def _fetch_known_vendors() -> set[str]:
     """List of every vendor name already in QBO (active or otherwise)."""
     try:
@@ -587,7 +635,7 @@ def _run_per_transaction_rules(
 
 def _run_global_rules(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    for rule in (_rule_negative_cash, _rule_cash_below_floor):
+    for rule in (_rule_negative_cash, _rule_cash_below_floor, _rule_individual_account_negative):
         try:
             hit = rule({}, ctx)
         except Exception as e:
@@ -674,12 +722,14 @@ def run_watch(as_of: datetime | None = None) -> dict[str, Any]:
     transactions = _fetch_recent_transactions(last_checked_at)
     operating_cash = _fetch_operating_cash()
     known_vendors = _fetch_known_vendors()
+    cash_accounts = _fetch_individual_cash_accounts()
 
     ctx: dict[str, Any] = {
         "operating_cash": operating_cash,
         "prior_operating_cash": prior_operating_cash,
         "known_vendors": known_vendors,
         "recent_transactions": recent_transactions,
+        "cash_accounts": cash_accounts,
     }
 
     # Evaluate

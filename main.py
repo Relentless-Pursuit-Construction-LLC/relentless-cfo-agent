@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from keystone import qbo, qbo_oauth
+from keystone import delivery, qbo, qbo_oauth
 
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get(
@@ -154,40 +154,75 @@ def sanity_pull(authorization: str | None = Header(default=None)) -> dict[str, A
 
 
 @app.post("/cron/ar-aging-digest")
-def cron_ar_aging(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron_ar_aging(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Pulls AR aging detail, returns + (by default) auto-delivers to Slack."""
     _require_admin(authorization)
     from keystone.jobs.ar_aging import run_ar_aging_digest
 
-    return run_ar_aging_digest()
+    result = run_ar_aging_digest()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_ar_aging(result)}
 
 
 @app.post("/cron/pulse")
-def cron_pulse(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron_pulse(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Daily cash heartbeat. Auto-delivers unless no_deliver=true."""
     _require_admin(authorization)
     from keystone.jobs.pulse import run_pulse
 
-    return run_pulse()
+    result = run_pulse()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_pulse(result)}
 
 
 @app.post("/cron/watch")
-def cron_watch(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron_watch(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Anomaly sweep. Auto-delivers critical+important unless no_deliver=true."""
     _require_admin(authorization)
     from keystone.jobs.watch import run_watch
 
-    return run_watch()
+    result = run_watch()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_watch(result)}
 
 
 @app.post("/cron/audit")
-def cron_audit(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron_audit(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Weekly audit. Auto-delivers Josh digest + Matt full unless no_deliver=true."""
     _require_admin(authorization)
     from keystone.jobs.audit import run_audit
 
-    return run_audit()
+    result = run_audit()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_audit(result)}
 
 
 @app.post("/cron/counsel")
-def cron_counsel(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron_counsel(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Monthly walkthrough. Auto-delivers (chunked) unless no_deliver=true."""
     _require_admin(authorization)
     from keystone.jobs.counsel import run_counsel
 
-    return run_counsel()
+    result = run_counsel()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_counsel(result)}

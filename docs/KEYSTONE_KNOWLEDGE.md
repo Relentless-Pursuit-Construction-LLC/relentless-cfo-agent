@@ -62,6 +62,50 @@ Keep entries short and concrete. Real example below.
 > - Tegan (UT) windows primary
 > - [add others]
 
+## Sales compensation structure (confirmed by Josh 2026-05-25)
+
+**Three positions per market** — Josh to confirm exactly which roles these are.
+Most likely: Setter, Closer, Manager. Keystone should ask if uncertain.
+
+**Closer commission tiers — weekly basis:**
+
+| Tier | Closes per week | Commission rate | Sit pay |
+|---|---|---|---|
+| **Tier 1** | 0-2 | 5% per deal | $150 per sit |
+| **Tier 2** | 3 | 7% per deal (applied to all 3 deals that week) | None |
+| **Tier 3** | 4+ | 9% per deal (applied to all deals that week) | None |
+
+**How Keystone should reason about this:**
+
+- Tier escalation is retroactive — a closer's 3rd close of the week bumps their first 2 closes up to 7%, not just the 3rd
+- Net commission cost shifts materially by tier:
+  - Tier 1: 5% of revenue (best margin for company)
+  - Tier 2: 7% of revenue (4 points worse, but volume offsets)
+  - Tier 3: 9% of revenue (4 more points worse, but higher unit count + lower CAC per deal)
+- Sit pay is a fixed cost — $150 × number of sits regardless of close. Closers stuck at Tier 1 with many sits = high cost-per-deal.
+- COGS "5101 Window Commissions - Closer Pay" reflects this comp structure
+- Closer commission lags installs by ~21 days because closers paid on funded jobs (per memory: Brady-style funded-job comp)
+
+**What Keystone should flag:**
+
+- Closers consistently in Tier 1 for 3+ weeks running — coaching opportunity (either training problem or wrong role)
+- Closers in Tier 3 with low AOV — they're discounting to land deals, eating the gross margin gain back
+- Weeks where commission COGS spikes — likely a Tier 3 hit (good) OR a sit-heavy/low-close week at Tier 1 (bad)
+- A market trending toward more Tier 3 weeks vs Tier 1 = positive operational signal
+
+**What Keystone should NOT do:**
+
+- Recommend changing the comp structure — that's a Josh + Matt strategic decision
+- Compare commissions across markets without controlling for AOV and close rate (different deal mix changes the math)
+
+> **Open items for Josh / Matt to clarify in this file:**
+> - What exactly are the "3 positions" in each market? (Setter / Closer / Manager — confirm)
+> - What's the setter compensation structure? (Hourly + per-sit? Per-booked appointment?)
+> - What's the manager compensation? (Salary + override on team production?)
+> - Is sit pay only for Tier 1 closers, or for closers + setters?
+> - When commissions are CALCULATED (week ending Saturday? Sunday?) and PAID (which day of following week?)
+> - Are there clawbacks if a job cancels post-close?
+
 ## Sales tax / compliance gotchas
 
 > _Matt — what Keystone should remember about tax compliance:_

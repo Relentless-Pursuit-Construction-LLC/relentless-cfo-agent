@@ -635,7 +635,11 @@ def _run_per_transaction_rules(
 
 def _run_global_rules(ctx: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    for rule in (_rule_negative_cash, _rule_cash_below_floor, _rule_individual_account_negative):
+    # NOTE: _rule_individual_account_negative is temporarily disabled — it was
+    # firing every hour because PERFBUS CHK remains in a persistent negative
+    # state (likely owner-draw pattern). Once dedup logic is added OR Matt
+    # writes the PERFBUS pattern into KNOWLEDGE.md, re-enable.
+    for rule in (_rule_negative_cash, _rule_cash_below_floor):
         try:
             hit = rule({}, ctx)
         except Exception as e:

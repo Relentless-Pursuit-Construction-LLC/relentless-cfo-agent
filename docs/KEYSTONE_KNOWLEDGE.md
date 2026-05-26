@@ -64,16 +64,56 @@ Keep entries short and concrete. Real example below.
 
 ## Sales compensation structure (confirmed by Josh 2026-05-25)
 
-**Three positions per market** — Josh to confirm exactly which roles these are.
-Most likely: Setter, Closer, Manager. Keystone should ask if uncertain.
+**Three positions per market:**
+1. **Setter** — books appointments, paid on conversion of their bookings
+2. **Closer** — sells in-home, paid on close (different rate depending on lead source)
+3. **Market Owner** — runs the market (manager role), paid % of net market profit
 
-**Closer commission tiers — weekly basis:**
+### Setter compensation — weekly tiered structure
 
-| Tier | Closes per week | Commission rate | Sit pay |
+| Tier | Closes per week (from setter's bookings) | Commission rate | Sit pay |
 |---|---|---|---|
 | **Tier 1** | 0-2 | 5% per deal | $150 per sit |
-| **Tier 2** | 3 | 7% per deal (applied to all 3 deals that week) | None |
-| **Tier 3** | 4+ | 9% per deal (applied to all deals that week) | None |
+| **Tier 2** | 3 | 7% per deal (applied retroactively to all 3 deals that week) | None |
+| **Tier 3** | 4+ | 9% per deal (applied retroactively to all deals that week) | None |
+
+### Closer compensation
+
+- **9-10% per deal** when taking a lead from a setter (setter gets their tiered cut on the same deal)
+- **18% per deal** when the closer knocked and set the appointment themselves (no setter share)
+- Historical context: Relentless was 100% door-knocking until ~2 weeks ago, so MOST deals have been self-knocked = paying closers at 18%. The new Google + digital marketing campaigns should shift comp toward setter-fed leads (closer drops to 9-10%, setter gets 5-9%). Net: similar combined cost, but lighter per-closer payouts.
+
+### Market Owner compensation
+
+- **25% of net profit for the market**
+- Net profit = market gross revenue minus office cost, recruiting, knocking gear for reps, etc.
+- Josh estimates this works out to roughly **5-7% of gross revenue** that the market produces
+- **Paid monthly on the 15th, for prior month's installs (not closes)** — paid on what actually installed last month, not what was sold last month
+- AZ: Cameron Kendall is the market owner
+- UT: NO market owner currently. Tegan is Josh + Matt's partner, so UT market profit stays in the company
+
+**CRITICAL OPEN ITEM:** Cameron hasn't been paid market owner pay yet this year because the books are messy. This is liability sitting on the balance sheet that's not being tracked. **Keystone should flag this prominently — it represents accrued comp owed to Cam that needs to be calculated and either paid or formally deferred.**
+
+### Total sales-comp stack on a typical deal
+
+| Lead source | Setter % | Closer % | Market owner % (of net) | Combined % of gross |
+|---|---|---|---|---|
+| Setter-fed lead | 5-9% | 9-10% | ~5-7% | **19-26%** |
+| Self-knocked (closer = setter) | 0% | 18% | ~5-7% | **23-25%** |
+
+Industry benchmark for residential window install "SG&A" (sales, general, admin) is 18-25% of revenue. Relentless sits at the high end of that band — historically because of 100% self-knocking at 18%. Should improve as setter-fed mix increases.
+
+### Pay cycles
+
+- **Setter + Closer commission:** weekly. Sell Mon-Sat, deposit collected, paid following Friday.
+- **Market Owner:** monthly. Paid the 15th for prior month's installs.
+- **New rep guarantee:** $300/week guaranteed for the first 2-3 weeks while training. Rep gets whichever is GREATER between guarantee and commission earned.
+
+### Clawbacks
+
+- 3-day federal right of rescission applies (cooling-off period)
+- After day 3, if a job cancels, **closer's clawback comes out of future commissions** (not direct repayment)
+- **Keystone should track this** — cancellations after rescission represent margin events that need to flow through the closer's commission ledger
 
 **How Keystone should reason about this:**
 
@@ -98,13 +138,69 @@ Most likely: Setter, Closer, Manager. Keystone should ask if uncertain.
 - Recommend changing the comp structure — that's a Josh + Matt strategic decision
 - Compare commissions across markets without controlling for AOV and close rate (different deal mix changes the math)
 
-> **Open items for Josh / Matt to clarify in this file:**
-> - What exactly are the "3 positions" in each market? (Setter / Closer / Manager — confirm)
-> - What's the setter compensation structure? (Hourly + per-sit? Per-booked appointment?)
-> - What's the manager compensation? (Salary + override on team production?)
-> - Is sit pay only for Tier 1 closers, or for closers + setters?
-> - When commissions are CALCULATED (week ending Saturday? Sunday?) and PAID (which day of following week?)
-> - Are there clawbacks if a job cancels post-close?
+## Pricing floor
+
+- **Minimum target: $2,300 per window** as a base
+- Historical floor: dipped to **$1,700 per window** at times — this is the discount territory that erodes margin
+- Keystone should flag deals/jobs where avg per-window price is under $2,000 — that's margin pressure
+
+## Suppliers
+
+- **Anlin Windows — primary current supplier** (switched ~recently from Alside)
+- Have supplier access to: Andersen, Milgard, Pella — but **haven't sold any of these yet**
+- Matt is the authoritative source on per-window costs and supplier-specific pricing — Keystone should consult Matt for cost benchmarks rather than guess
+
+## Installers (subcontractors)
+
+- All installers are **1099 subcontractors** (no W-2 install crews)
+- **Arizona:** 2 main installers, each running 4 crews = ~8 crews total
+- **Utah:** 1 main installer with crews (count TBD)
+
+## Lead sources
+
+- **Historical: 100% door-knocking** through ~mid-May 2026
+- **New as of ~mid-May:** Google ads + digital marketing campaign launched
+- Keystone should watch the lead-source mix shift as the marketing pipeline matures — this will materially affect closer comp (18% self-knocked → 9-10% setter-fed) and CAC
+
+## Permits + inspections
+
+- **No permits or inspections needed for window installs** — simplifies cash conversion compared to roofing or remodel work
+
+## Warranty
+
+- **Manufacturer covers almost all warranty issues** (Anlin handles most claims)
+- Warranty reserve set-aside is therefore less critical for Relentless than for trades where warranty falls on the installer
+
+## Customer financing
+
+- **Two financing partners:** Synchrony and Green Sky
+- **About 50% of overall sales volume is financed** through these two
+- **Synchrony:** 50% paid upfront to Relentless on funded deal, 50% on backend (after install). NEW as of ~mid-May 2026.
+- **Green Sky:** 20% upfront, 80% backend.
+- **Pre-mid-May 2026:** financed deals paid NOTHING upfront — Relentless carried 100% of materials + labor cost before any cash came in. This was a major working capital strain. The Synchrony shift is a meaningful cash flow improvement.
+
+**Keystone should track financed vs cash deals separately** — they have radically different cash flow profiles. A "great month" of financed deals can still create a cash crunch if upfront funding doesn't cover crew + materials.
+
+## Utah multi-trade
+
+- AZ is **windows + roofing** only
+- **UT does general contracting** in addition to windows: kitchen remodels, decks, siding, bathroom remodels
+- Some UT customers have bought windows AND other projects from Relentless
+- **Window + roofing combined deals exist** — some financed under ONE loan, which makes attribution between the two trades hard. Keystone should help propose a cleaner way to track these.
+
+## GoHighLevel = source of truth for sales
+
+- **GHL is the system of record for closers, customers, and opportunities**
+- **QBO is just for invoicing** — invoices flow from GHL → Matt's webhook service → QBO
+- This is why Customer.SalesRep is empty in QBO — the rep info lives in GHL, not QBO
+- **Keystone should cross-reference QBO and GHL** during audits to get full attribution
+
+## Open items / things Keystone should always ask Matt or Josh about
+
+- Per-window manufacturer costs (Matt knows)
+- Specific clawback amounts ever taken from closer commissions
+- The accrued (unpaid) Cameron market-owner liability — needs to be calculated and addressed
+- Tracking proposal for combined window-roofing financed deals
 
 ## Sales tax / compliance gotchas
 

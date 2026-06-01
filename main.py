@@ -111,6 +111,46 @@ def qbo_callback(
     )
 
 
+@app.post("/admin/invoices-for-date")
+def admin_invoices_for_date(
+    date: str = Query(..., description="YYYY-MM-DD"),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Diagnostic: pulls every invoice with TxnDate = the given date.
+
+    Returns count, total, and the top-20 by amount with customer + doc number.
+    Used to investigate anomalous "yesterday's revenue" numbers from the Pulse.
+    """
+    _require_admin(authorization)
+    result = qbo.get_invoices_for_date(date)
+    invoices = (result.get("QueryResponse") or {}).get("Invoice", []) or []
+
+    def _amt(inv: dict[str, Any]) -> float:
+        try:
+            return float(inv.get("TotalAmt") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    sorted_invoices = sorted(invoices, key=lambda i: -_amt(i))
+    total = sum(_amt(i) for i in invoices)
+    return {
+        "date": date,
+        "count": len(invoices),
+        "total": round(total, 2),
+        "top_20": [
+            {
+                "doc_number": i.get("DocNumber"),
+                "customer": (i.get("CustomerRef") or {}).get("name"),
+                "total_amt": _amt(i),
+                "txn_date": i.get("TxnDate"),
+                "created_at": (i.get("MetaData") or {}).get("CreateTime"),
+                "last_updated_at": (i.get("MetaData") or {}).get("LastUpdatedTime"),
+            }
+            for i in sorted_invoices[:20]
+        ],
+    }
+
+
 @app.post("/admin/signing-secret-check")
 def signing_secret_check(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Diagnostic: confirms whether SLACK_SIGNING_SECRET is loaded in the container,

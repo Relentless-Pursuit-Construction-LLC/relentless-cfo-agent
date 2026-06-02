@@ -10,6 +10,7 @@ Endpoint surface:
   POST /cron/watch              — hourly anomaly sweep (6 AM – 10 PM MT)
   POST /cron/audit              — weekly audit (Mon 7:00 AM MT)
   POST /cron/counsel            — monthly walkthrough (5th of month 7:00 AM MT)
+  POST /cron/revenue-tracker    — monthly revenue tracker (1st of month 7:00 AM MT)
 
 Admin/cron endpoints are gated by ADMIN_SECRET (Bearer token).
 The /qbo/connect endpoint accepts the secret as a query parameter so Josh can
@@ -318,6 +319,22 @@ def cron_counsel(
     if no_deliver:
         return {**result, "delivery": "skipped (no_deliver=true)"}
     return {**result, "delivery": delivery.deliver_counsel(result)}
+
+
+@app.post("/cron/revenue-tracker")
+def cron_revenue_tracker(
+    authorization: str | None = Header(default=None),
+    no_deliver: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Monthly revenue tracker — sales booked + recognized + cash, 6 months.
+    Auto-delivers to Josh + Matt unless no_deliver=true."""
+    _require_admin(authorization)
+    from keystone.jobs.revenue_tracker import run_revenue_tracker
+
+    result = run_revenue_tracker()
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    return {**result, "delivery": delivery.deliver_simple(result, ["josh", "matt"])}
 
 
 # --- Slack events: conversational Q&A -------------------------------------

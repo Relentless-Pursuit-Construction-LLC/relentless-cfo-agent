@@ -144,6 +144,20 @@ def _chunk_counsel(report: str) -> list[str]:
 # --- Job-specific delivery functions ---------------------------------------
 
 
+def deliver_simple(result: dict[str, Any], audience: list[str]) -> dict[str, Any]:
+    """Generic: send result['message_text'] to a symbolic audience list.
+
+    Used by jobs that produce one message for a fixed audience (e.g. the
+    monthly revenue tracker). Honors the KEYSTONE_AUDIENCE soft-launch gate.
+    """
+    text = result.get("message_text", "")
+    if not text:
+        return {"sent": [], "skipped_reason": "no message_text"}
+    ids = _resolve_audience(audience)
+    sent = _send_many(ids, text)
+    return {"sent": sent, "recipient_count": len(sent)}
+
+
 def deliver_pulse(result: dict[str, Any]) -> dict[str, Any]:
     """Pulse → Josh + Matt (plus Joanne when FINANCE_SLACK_ID is set)."""
     text = result.get("message_text", "")

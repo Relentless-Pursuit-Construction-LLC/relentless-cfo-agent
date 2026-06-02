@@ -315,6 +315,24 @@ def get_deposits_for_date(date_str: str) -> dict[str, Any]:
     return qbo_query(q)
 
 
+def get_payments_for_range(start_date: str, end_date: str) -> dict[str, Any]:
+    """All customer payments with TxnDate in [start, end] inclusive."""
+    q = (
+        f"SELECT * FROM Payment WHERE TxnDate >= '{_qbo_escape(start_date)}' "
+        f"AND TxnDate <= '{_qbo_escape(end_date)}' MAXRESULTS 1000"
+    )
+    return qbo_query(q)
+
+
+def get_deposits_for_range(start_date: str, end_date: str) -> dict[str, Any]:
+    """All bank deposits with TxnDate in [start, end] inclusive."""
+    q = (
+        f"SELECT * FROM Deposit WHERE TxnDate >= '{_qbo_escape(start_date)}' "
+        f"AND TxnDate <= '{_qbo_escape(end_date)}' MAXRESULTS 1000"
+    )
+    return qbo_query(q)
+
+
 def get_open_invoices(limit: int = 1000) -> dict[str, Any]:
     """All invoices with outstanding balance."""
     q = (

@@ -257,9 +257,59 @@ def get_profit_loss(
 
 
 def get_invoices_for_date(date_str: str) -> dict[str, Any]:
-    """All invoices created on a specific date."""
+    """All invoices with TxnDate = the given date (the accounting/service date).
+
+    WARNING: TxnDate is frequently backdated at Relentless (Joanne dates invoices
+    to install date or month-end). So this can sweep up old invoices that merely
+    carry this date. For 'what actually happened on day X', use
+    get_invoices_created_on_date() instead.
+    """
     q = (
         f"SELECT * FROM Invoice WHERE TxnDate = '{_qbo_escape(date_str)}' "
+        f"MAXRESULTS 1000"
+    )
+    return qbo_query(q)
+
+
+def get_invoices_created_on_date(date_str: str) -> dict[str, Any]:
+    """All invoices actually CREATED on a date (by MetaData.CreateTime).
+
+    This is 'new bills we genuinely issued that day' — immune to TxnDate
+    backdating. CreateTime is a datetime, so we bound it to the full day.
+    """
+    start = f"{date_str}T00:00:00"
+    end = f"{date_str}T23:59:59"
+    q = (
+        f"SELECT * FROM Invoice "
+        f"WHERE MetaData.CreateTime >= '{_qbo_escape(start)}' "
+        f"AND MetaData.CreateTime <= '{_qbo_escape(end)}' "
+        f"MAXRESULTS 1000"
+    )
+    return qbo_query(q)
+
+
+def get_payments_for_date(date_str: str) -> dict[str, Any]:
+    """All customer payments received on a date (TxnDate basis).
+
+    This is 'money customers paid us that day' — the closest QBO proxy for
+    cash collected. Note: still subject to QBO bank-feed sync lag vs the
+    actual bank. For true bank deposits, pair with Ramp/Chase direct (Phase 2).
+    """
+    q = (
+        f"SELECT * FROM Payment WHERE TxnDate = '{_qbo_escape(date_str)}' "
+        f"MAXRESULTS 1000"
+    )
+    return qbo_query(q)
+
+
+def get_deposits_for_date(date_str: str) -> dict[str, Any]:
+    """All bank deposits recorded on a date (TxnDate basis).
+
+    Deposit entities are money landing in a bank account in QBO. Combined with
+    payments, gives a fuller 'money in' picture.
+    """
+    q = (
+        f"SELECT * FROM Deposit WHERE TxnDate = '{_qbo_escape(date_str)}' "
         f"MAXRESULTS 1000"
     )
     return qbo_query(q)

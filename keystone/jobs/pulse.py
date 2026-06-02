@@ -1,18 +1,23 @@
 """The Pulse — daily cash heartbeat.
 
-Runs 6:30 AM MT (Mon-Sun). Single message + email to Josh, Matt, Joanne.
+Runs 6:32 AM AZ daily. Single Slack message to the KEYSTONE_AUDIENCE.
 
-Body (under 50 words):
-  - Cash position (Chase aggregate from QBO balance sheet)
-  - Day-over-day change (from prior snapshot in /data/pulse_history.json)
-  - Yesterday's revenue (sum of QBO invoices dated yesterday — TxnDate basis)
-  - Vs. $12,500 daily target ($75K/week / 6 days)
-  - 7-day rolling avg revenue (once history has data)
-  - One anomaly flag (cash drop >$10K w/no scheduled outflow, or revenue <50% of 7-day avg)
-  - Data freshness — halt if QBO BalanceSheet report timestamp >48h old
+Shows FOUR distinct "revenue-ish" numbers, each clearly labeled so they never
+blur together (the 2026-06-01 incident: a $405K 'revenue' number that was really
+old invoices backdated to month-end):
 
-Revenue source of truth: QBO Invoices with TxnDate = yesterday (gross invoiced).
-Cash collection (payments-based) is a Phase 2 enhancement.
+  1. CASH IN THE BANK — total + per-account, day-over-day change (balance sheet)
+  2. MONEY COLLECTED YESTERDAY — customer Payments + bank Deposits (real cash in)
+  3. NEW BILLS SENT YESTERDAY — invoices CREATED yesterday (MetaData.CreateTime),
+     immune to TxnDate backdating
+  4. BILLS DATED YESTERDAY — invoices with TxnDate=yesterday. Flagged when it
+     looks inflated by backdated invoices.
+
+Plus: 7-day rolling avg of NEW BILLS (real activity), one anomaly flag, and a
+freshness gate (halt if QBO BalanceSheet timestamp >48h old).
+
+Phase 2: live bank-deposit verification straight from Ramp/Chase (needs a Ramp
+API key) to sit alongside the QBO-recorded "money collected" number.
 """
 
 from __future__ import annotations
@@ -203,17 +208,26 @@ def extract_cash_position(balance_sheet: dict[str, Any]) -> dict[str, Any]:
     return {"total": total, "accounts": accounts, "report_as_of": report_as_of}
 
 
-def extract_invoiced_revenue(invoice_query_result: dict[str, Any]) -> float:
-    """Sum TotalAmt across the invoices returned by get_invoices_for_date()."""
-    qr = invoice_query_result.get("QueryResponse", {})
-    invoices = qr.get("Invoice", []) or []
+def _sum_entity(query_result: dict[str, Any], entity: str, field: str = "TotalAmt") -> tuple[float, int]:
+    """Sum a money field across an entity list in a QBO query response.
+
+    Returns (total, count). Handles numeric and string amounts.
+    """
+    qr = query_result.get("QueryResponse", {})
+    rows = qr.get(entity, []) or []
     total = 0.0
-    for inv in invoices:
-        amt = inv.get("TotalAmt")
+    for r in rows:
+        amt = r.get(field)
         if isinstance(amt, (int, float)):
             total += float(amt)
         elif isinstance(amt, str):
             total += _parse_money(amt)
+    return total, len(rows)
+
+
+def extract_invoiced_revenue(invoice_query_result: dict[str, Any]) -> float:
+    """Sum TotalAmt across the invoices returned by an invoice query."""
+    total, _ = _sum_entity(invoice_query_result, "Invoice")
     return total
 
 
@@ -266,36 +280,77 @@ def _fmt_signed(v: float) -> str:
     return f"{sign}{_fmt_dollars(abs(v))}"
 
 
-def _build_message(stats: dict[str, Any], anomalies: list[str], pull_ts_az: str) -> str:
-    """Compose the body Keystone speaks to Josh. Under 50 words."""
+def _build_message(stats: dict[str, Any], anomalies: list[str], pull_ts_az: str, yesterday_label: str) -> str:
+    """Compose the daily Pulse. Four clearly-labeled sections, plain English.
+
+    Sections deliberately separate the FOUR different 'revenue-ish' numbers so
+    they never blur together:
+      1. CASH IN THE BANK — what we actually have right now
+      2. MONEY COLLECTED — what customers actually paid us yesterday
+      3. NEW BILLS SENT — invoices we genuinely created yesterday
+      4. BILLS DATED YESTERDAY — accounting-date total (can include backdated)
+    """
     cash = stats["cash_position"]
     dod = stats.get("cash_dod_change")
-    rev = stats["yesterday_revenue"]
-    tgt = stats["daily_revenue_target"]
-    pct_target = (rev / tgt * 100) if tgt else 0
-    rolling = stats.get("rolling_7d_avg_revenue")
+    accounts = stats.get("cash_accounts", []) or []
 
-    lines = []
+    collected = stats.get("money_collected_yesterday", 0.0)
+    collected_count = stats.get("money_collected_count", 0)
+
+    new_bills = stats.get("new_bills_sent", 0.0)
+    new_bills_count = stats.get("new_bills_count", 0)
+
+    dated = stats.get("yesterday_revenue", 0.0)
+    dated_count = stats.get("yesterday_revenue_count", 0)
+    backdated_flag = stats.get("backdated_detected", False)
+
+    L: list[str] = [f"RELENTLESS — DAILY PULSE — {yesterday_label}", ""]
+
+    # 1. Cash in the bank
     if dod is None:
-        lines.append(f"Cash: {_fmt_dollars(cash)} (no prior snapshot).")
+        L.append(f"CASH IN THE BANK (what we have): {_fmt_dollars(cash)} (no prior day to compare)")
     else:
-        lines.append(f"Cash: {_fmt_dollars(cash)} ({_fmt_signed(dod)} vs yesterday).")
+        L.append(f"CASH IN THE BANK (what we have): {_fmt_dollars(cash)} ({_fmt_signed(dod)} vs yesterday)")
+    for a in accounts:
+        nm = a.get("name", "account")
+        bal = a.get("balance", 0.0)
+        L.append(f"   - {nm}: {_fmt_dollars(bal)}")
 
-    lines.append(
-        f"Yesterday's revenue: {_fmt_dollars(rev)} ({pct_target:.0f}% of {_fmt_dollars(tgt)} target)."
+    # 2. Money actually collected
+    L.append("")
+    L.append(
+        f"MONEY COLLECTED YESTERDAY (customers paid us): {_fmt_dollars(collected)} "
+        f"across {collected_count} payment(s)"
+    )
+    L.append("   (from QBO records; live bank-deposit verification coming in Phase 2)")
+
+    # 3. New bills actually created
+    L.append("")
+    L.append(
+        f"NEW BILLS SENT YESTERDAY (invoices we created): {_fmt_dollars(new_bills)} "
+        f"across {new_bills_count} new invoice(s)"
     )
 
-    if rolling is None:
-        lines.append("7-day avg: not enough history yet.")
-    else:
-        lines.append(f"7-day avg: {_fmt_dollars(rolling)}/day.")
+    # 4. Accounting-date total, with backdating caveat
+    L.append("")
+    L.append(
+        f"BILLS DATED YESTERDAY (accounting date): {_fmt_dollars(dated)} across {dated_count} invoice(s)"
+    )
+    if backdated_flag:
+        L.append(
+            "   Heads up: this total includes older invoices stamped with yesterday's "
+            "date (backdating), so it overstates real activity. Use the two numbers above "
+            "for what actually happened."
+        )
 
+    # Anomalies
+    L.append("")
     if anomalies:
-        lines.append("Flag: " + "; ".join(anomalies))
+        L.append("FLAG: " + "; ".join(anomalies))
     else:
-        lines.append("Anomalies: none flagged.")
+        L.append("ANOMALIES: none flagged.")
 
-    body = " ".join(lines)
+    body = "\n".join(L)
     sign_off = f"\n\n— Keystone\nData pulled: {pull_ts_az} AZ"
     return body + sign_off
 
@@ -338,9 +393,32 @@ def run_pulse(as_of: date | None = None) -> dict[str, Any]:
     cash_info = extract_cash_position(balance_sheet)
     cash_total = cash_info["total"]
 
-    # 4. Yesterday's revenue from QBO invoices dated yesterday.
+    # 4. The four "revenue-ish" numbers, kept distinct:
+
+    # 4a. Money actually collected yesterday (customer payments + bank deposits)
+    payments = qbo.get_payments_for_date(yesterday_str)
+    payments_total, payments_count = _sum_entity(payments, "Payment")
+    try:
+        deposits = qbo.get_deposits_for_date(yesterday_str)
+        deposits_total, deposits_count = _sum_entity(deposits, "Deposit")
+    except Exception:
+        deposits_total, deposits_count = 0.0, 0
+    money_collected = payments_total + deposits_total
+    money_collected_count = payments_count + deposits_count
+
+    # 4b. New bills genuinely created yesterday (immune to backdating)
+    created_invoices = qbo.get_invoices_created_on_date(yesterday_str)
+    new_bills_total, new_bills_count = _sum_entity(created_invoices, "Invoice")
+
+    # 4c. Invoices DATED yesterday (TxnDate basis — may include backdated)
     invoices = qbo.get_invoices_for_date(yesterday_str)
-    yesterday_revenue = extract_invoiced_revenue(invoices)
+    yesterday_revenue, yesterday_revenue_count = _sum_entity(invoices, "Invoice")
+
+    # Detect backdating: if the TxnDate total is much bigger than the
+    # genuinely-created total, old invoices are being swept in.
+    backdated_detected = (
+        yesterday_revenue > new_bills_total * 1.5 and yesterday_revenue > 25_000
+    )
 
     # 5. History — load, compute deltas, append today's snapshot.
     history = _load_history()
@@ -353,17 +431,21 @@ def run_pulse(as_of: date | None = None) -> dict[str, Any]:
         cash_dod_change = None
 
     # 6. Anomaly detection — at most one surfaced in the body.
+    #    Anomalies now key off MONEY COLLECTED + NEW BILLS, not the backdating-
+    #    distorted TxnDate number.
     anomalies: list[str] = []
     if cash_dod_change is not None and cash_dod_change < -CASH_DROP_FLAG_THRESHOLD:
         anomalies.append(
             f"cash down {_fmt_dollars(abs(cash_dod_change))} day-over-day — confirm with Joanne which outflow drove it"
         )
-    if rolling_avg is not None and rolling_avg > 0 and yesterday_revenue < rolling_avg * REVENUE_LOW_FLAG_RATIO:
+    if rolling_avg is not None and rolling_avg > 0 and new_bills_total < rolling_avg * REVENUE_LOW_FLAG_RATIO:
         anomalies.append(
-            f"revenue {_fmt_dollars(yesterday_revenue)} is below 50% of 7-day avg {_fmt_dollars(rolling_avg)}"
+            f"new bills {_fmt_dollars(new_bills_total)} below 50% of 7-day avg {_fmt_dollars(rolling_avg)}"
         )
     # System prompt says "one anomaly if any" — keep the most material.
     surfaced = anomalies[:1]
+
+    yesterday_label = yesterday.strftime("%a %b %d, %Y")
 
     stats: dict[str, Any] = {
         "as_of": today_str,
@@ -371,22 +453,35 @@ def run_pulse(as_of: date | None = None) -> dict[str, Any]:
         "cash_position": cash_total,
         "cash_accounts": cash_info["accounts"],
         "cash_dod_change": cash_dod_change,
+        # Money actually collected (customer payments + bank deposits)
+        "money_collected_yesterday": money_collected,
+        "money_collected_count": money_collected_count,
+        "money_collected_payments": payments_total,
+        "money_collected_deposits": deposits_total,
+        # New bills genuinely created yesterday
+        "new_bills_sent": new_bills_total,
+        "new_bills_count": new_bills_count,
+        # Invoices DATED yesterday (TxnDate — may be backdated)
         "yesterday_revenue": yesterday_revenue,
+        "yesterday_revenue_count": yesterday_revenue_count,
+        "backdated_detected": backdated_detected,
         "daily_revenue_target": DAILY_REVENUE_TARGET,
-        "revenue_pct_of_target": (yesterday_revenue / DAILY_REVENUE_TARGET * 100) if DAILY_REVENUE_TARGET else None,
         "rolling_7d_avg_revenue": rolling_avg,
         "freshness": freshness,
         "prior_snapshot_date": prior["as_of"] if prior else None,
         "pull_timestamp_az": pull_ts_az,
     }
 
-    message_text = _build_message(stats, surfaced, pull_ts_az)
+    message_text = _build_message(stats, surfaced, pull_ts_az, yesterday_label)
 
     # 7. Persist today's snapshot for tomorrow's run.
+    #    Rolling average now tracks NEW BILLS (real daily activity), not the
+    #    backdating-distorted TxnDate number.
     history["snapshots"].append({
         "as_of": today_str,
         "cash_position": cash_total,
-        "yesterday_revenue": yesterday_revenue,
+        "yesterday_revenue": new_bills_total,
+        "money_collected": money_collected,
         "pulled_at": now_az.isoformat(),
     })
     try:

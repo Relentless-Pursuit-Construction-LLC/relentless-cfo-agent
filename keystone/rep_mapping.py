@@ -49,6 +49,18 @@ def get_rep_by_name(name: str) -> dict[str, Any] | None:
     return None
 
 
+def get_rep_by_email(email: str) -> dict[str, Any] | None:
+    """Find a rep entry by email (case-insensitive)."""
+    email_lower = (email or "").strip().lower()
+    if not email_lower:
+        return None
+    registry = get_rep_registry()
+    for entry in registry.get("reps", []):
+        if (entry.get("email") or "").strip().lower() == email_lower:
+            return entry
+    return None
+
+
 def get_slack_id_for_rep(name: str) -> str | None:
     rep = get_rep_by_name(name)
     return rep.get("slack_id") if rep else None

@@ -40,12 +40,27 @@ def get_rep_registry() -> dict[str, Any]:
 
 
 def get_rep_by_name(name: str) -> dict[str, Any] | None:
-    """Find a rep entry by name (case-insensitive)."""
+    """Find a rep entry by name (case-insensitive).
+
+    Falls back to a UNIQUE first-name match so app-style short names
+    ("tegan") resolve to registry full names ("Tegan Judd"). Ambiguous
+    first names return None rather than guessing.
+    """
     registry = get_rep_registry()
-    name_lower = name.lower()
-    for entry in registry.get("reps", []):
+    name_lower = (name or "").strip().lower()
+    if not name_lower:
+        return None
+    reps = registry.get("reps", [])
+    for entry in reps:
         if entry.get("name", "").lower() == name_lower:
             return entry
+    first = name_lower.split()[0]
+    candidates = [
+        e for e in reps
+        if (e.get("name") or "").strip().lower().split()[:1] == [first]
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
     return None
 
 

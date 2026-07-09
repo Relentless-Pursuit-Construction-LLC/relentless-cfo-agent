@@ -142,15 +142,34 @@ def get_qbo_access_token() -> str:
 # --- API helpers -----------------------------------------------------------
 
 
+def _is_transient_qbo_error(resp: httpx.Response) -> bool:
+    """True for Intuit-side hiccups worth retrying.
+
+    5xx = server errors. 400 with Fault code "10000" is Intuit's generic
+    "An application error has occurred while processing your request" —
+    a transient Intuit failure, NOT a bad request from us. This exact error
+    killed the 2026-07-08 morning pulse.
+    """
+    if resp.status_code >= 500:
+        return True
+    if resp.status_code == 400 and '"code":"10000"' in resp.text:
+        return True
+    return False
+
+
 def _qbo_request(
     method: str,
     path: str,
     json_body: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
     *,
-    max_retries: int = 1,
+    max_retries: int = 3,
 ) -> dict[str, Any]:
-    """Make a QBO API call. Handles 401 by refreshing + retrying once."""
+    """Make a QBO API call.
+
+    Retries on: network errors, 401 (after forcing a token refresh), and
+    transient Intuit errors (5xx / 400-code-10000) with a short backoff.
+    """
     url = f"{QBO_API_BASE}/v3/company/{QBO_REALM_ID}{path}"
     attempt = 0
     last_exc: Exception | None = None
@@ -173,6 +192,7 @@ def _qbo_request(
         except httpx.HTTPError as e:
             last_exc = e
             attempt += 1
+            time.sleep(min(2 * attempt, 6))
             continue
 
         if resp.status_code == 401 and attempt < max_retries:
@@ -181,6 +201,12 @@ def _qbo_request(
             tokens["access_token_expires_at"] = 0
             _qbo_token_save(tokens)
             attempt += 1
+            continue
+
+        if _is_transient_qbo_error(resp) and attempt < max_retries:
+            # Intuit-side hiccup — back off briefly and retry
+            attempt += 1
+            time.sleep(min(2 * attempt, 6))
             continue
 
         if resp.status_code >= 400:

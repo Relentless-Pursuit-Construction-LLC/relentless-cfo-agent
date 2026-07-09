@@ -19,14 +19,17 @@ hit it from a browser (one-time only).
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from keystone import delivery, qbo, qbo_oauth, slack_verify
+
+logger = logging.getLogger("keystone.main")
 
 ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get(
@@ -35,6 +38,58 @@ PUBLIC_BASE_URL = os.environ.get(
 QBO_REDIRECT_URI = f"{PUBLIC_BASE_URL}/qbo/callback"
 
 app = FastAPI(title="Keystone — Relentless CFO Agent", version="0.1.0")
+
+
+def _safe_cron(
+    job_name: str,
+    run_fn: Callable[[], dict[str, Any]],
+    deliver_fn: Callable[[dict[str, Any]], dict[str, Any]],
+    no_deliver: bool,
+) -> dict[str, Any]:
+    """Run a cron job defensively.
+
+    A crash here must NEVER surface as an HTTP 500 — the curl cron container
+    treats 500 as failure, exits non-zero, and Railway flags the cron service
+    as Crashed, which then eats the next scheduled run (the 2026-07-08/09
+    missing-pulse incident: one transient Intuit error killed two mornings).
+
+    Instead: any exception produces a short error notice DELIVERED to Slack
+    (so silence never happens) and an HTTP 200 with ok=false.
+    """
+    try:
+        result = run_fn()
+    except Exception as e:
+        logger.exception("%s failed", job_name)
+        err_text = (
+            f"{job_name} did not run this morning. "
+            f"Cause: {type(e).__name__}: {str(e)[:250]}\n"
+            f"This is usually a temporary QuickBooks/API outage. The job runs "
+            f"again on its next schedule. If this repeats two days in a row, "
+            f"flag it to Josh.\n\n— Keystone"
+        )
+        delivery_result: Any = "skipped (no_deliver=true)"
+        if not no_deliver:
+            try:
+                delivery_result = delivery.deliver_simple(
+                    {"message_text": err_text}, ["josh", "matt"]
+                )
+            except Exception:
+                logger.exception("%s error-notice delivery failed", job_name)
+                delivery_result = {"error": "error-notice delivery also failed"}
+        return {
+            "ok": False,
+            "job": job_name,
+            "error": f"{type(e).__name__}: {str(e)[:500]}",
+            "delivery": delivery_result,
+        }
+
+    if no_deliver:
+        return {**result, "delivery": "skipped (no_deliver=true)"}
+    try:
+        return {**result, "delivery": deliver_fn(result)}
+    except Exception as e:
+        logger.exception("%s delivery failed", job_name)
+        return {**result, "delivery": {"error": f"{type(e).__name__}: {str(e)[:300]}"}}
 
 
 def _require_admin(authorization: str | None) -> None:
@@ -255,10 +310,7 @@ def cron_ar_aging(
     _require_admin(authorization)
     from keystone.jobs.ar_aging import run_ar_aging_digest
 
-    result = run_ar_aging_digest()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_ar_aging(result)}
+    return _safe_cron("AR aging digest", run_ar_aging_digest, delivery.deliver_ar_aging, no_deliver)
 
 
 @app.post("/cron/pulse")
@@ -270,10 +322,7 @@ def cron_pulse(
     _require_admin(authorization)
     from keystone.jobs.pulse import run_pulse
 
-    result = run_pulse()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_pulse(result)}
+    return _safe_cron("Daily Pulse", run_pulse, delivery.deliver_pulse, no_deliver)
 
 
 @app.post("/cron/watch")
@@ -285,10 +334,7 @@ def cron_watch(
     _require_admin(authorization)
     from keystone.jobs.watch import run_watch
 
-    result = run_watch()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_watch(result)}
+    return _safe_cron("The Watch", run_watch, delivery.deliver_watch, no_deliver)
 
 
 @app.post("/cron/audit")
@@ -300,10 +346,7 @@ def cron_audit(
     _require_admin(authorization)
     from keystone.jobs.audit import run_audit
 
-    result = run_audit()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_audit(result)}
+    return _safe_cron("Weekly Audit", run_audit, delivery.deliver_audit, no_deliver)
 
 
 @app.post("/cron/counsel")
@@ -315,10 +358,7 @@ def cron_counsel(
     _require_admin(authorization)
     from keystone.jobs.counsel import run_counsel
 
-    result = run_counsel()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_counsel(result)}
+    return _safe_cron("Monthly Counsel", run_counsel, delivery.deliver_counsel, no_deliver)
 
 
 @app.post("/cron/revenue-tracker")
@@ -331,10 +371,12 @@ def cron_revenue_tracker(
     _require_admin(authorization)
     from keystone.jobs.revenue_tracker import run_revenue_tracker
 
-    result = run_revenue_tracker()
-    if no_deliver:
-        return {**result, "delivery": "skipped (no_deliver=true)"}
-    return {**result, "delivery": delivery.deliver_simple(result, ["josh", "matt"])}
+    return _safe_cron(
+        "Monthly Revenue Tracker",
+        run_revenue_tracker,
+        lambda r: delivery.deliver_simple(r, ["josh", "matt"]),
+        no_deliver,
+    )
 
 
 # --- Slack events: conversational Q&A -------------------------------------

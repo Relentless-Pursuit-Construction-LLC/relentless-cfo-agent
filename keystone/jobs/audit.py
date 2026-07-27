@@ -751,6 +751,15 @@ def run_audit(as_of: date | None = None) -> dict[str, Any]:
     # Persist this week's snapshot for next week's deltas
     _save_snapshot({"run_at": now.isoformat(), "stats": stats, "flags": flags})
 
+    # Mirror the four Finance numbers into the LifeDesign CEO Scorecard.
+    # Fail-soft: a bridge/network error must never break the audit — only flag it.
+    try:
+        from keystone.scorecard_push import push_finance_scorecard
+
+        flags.append(f"scorecard_push: {push_finance_scorecard(stats)}")
+    except Exception as e:  # noqa: BLE001 - defensive, same philosophy as _safe_cron
+        flags.append(f"scorecard_push_failed: {type(e).__name__}: {str(e)[:120]}")
+
     return {
         "josh_message": josh_msg,
         "matt_message": matt_msg,

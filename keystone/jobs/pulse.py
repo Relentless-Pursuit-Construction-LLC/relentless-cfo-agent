@@ -490,6 +490,16 @@ def run_pulse(as_of: date | None = None) -> dict[str, Any]:
         # Don't fail the morning report because the volume hiccupped — surface it.
         stats["history_write_error"] = str(e)
 
+    # Daily: mirror today's Cash in Bank into the CEO scorecard (current week).
+    # Fail-soft — the message is already built above, so a bridge error here
+    # can never affect the pulse report or delivery.
+    try:
+        from keystone.scorecard_push import push_daily_cash
+
+        stats["scorecard_push"] = push_daily_cash(cash_total, today)
+    except Exception as e:  # noqa: BLE001 - defensive, same philosophy as _safe_cron
+        stats["scorecard_push_error"] = f"{type(e).__name__}: {str(e)[:120]}"
+
     return {
         "message_text": message_text,
         "stats": stats,

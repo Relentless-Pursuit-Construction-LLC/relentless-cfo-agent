@@ -27,7 +27,7 @@ from typing import Any
 # in stats; the scorecard stores it as a percent number (e.g. 35.0).
 # cash_in_bank is intentionally NOT here — it's pushed DAILY by the pulse job
 # (push_daily_cash), so the weekly audit must never write or delete it.
-_FINANCE_KEYS = {"revenue_collected", "ar_outstanding", "gross_margin"}
+_FINANCE_KEYS = {"revenue_collected", "ar_outstanding", "gross_margin", "cash_conversion_days"}
 
 
 def _week_ending(week_window: str) -> str:
@@ -49,10 +49,12 @@ def _rows_from_stats(stats: dict[str, Any]) -> tuple[str, str, list[dict[str, An
     we = _week_ending(stats["week_window"])
     q = _quarter(we)
     gm = (stats.get("margin") or {}).get("gross_margin")
+    cc = (stats.get("cash_conv") or {}).get("avg_days")
     vals = {
         "revenue_collected": (stats.get("revenue") or {}).get("revenue"),
         "ar_outstanding": (stats.get("ar") or {}).get("total_ar"),
         "gross_margin": round(gm * 100, 1) if gm is not None else None,
+        "cash_conversion_days": round(cc, 1) if cc is not None else None,
     }
     rows = [
         {"metric_key": k, "week_ending": we, "actual": round(v, 2), "quarter": q}

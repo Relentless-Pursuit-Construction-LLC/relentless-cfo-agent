@@ -3,6 +3,8 @@
 Polls QBO Purchase / Deposit / Transfer entities for activity since the
 last-checked timestamp. Evaluates each transaction against a list of
 rules and classifies findings into critical / important / informational.
+Also scans new Bills / Purchases for COGS (5xxx) lines booked without a
+customer:job and flags them (see _check_untagged_cogs).
 
 Persona note: Keystone is calm. False positives at 2 AM destroy trust,
 so the critical bar is intentionally high (negative cash, NSF text, or
@@ -609,6 +611,96 @@ def _fetch_known_vendors() -> set[str]:
     return {str(r.get("DisplayName")) for r in rows if r.get("DisplayName")}
 
 
+# --- Untagged-COGS check ---------------------------------------------------
+#
+# Matt's rule (2026-07): every material PO, sub-labor bill, and commission must
+# carry a customer:job. Cost booked to a vendor/rep with no job never lands on
+# per-job or per-month margin, and it pools into an "unassigned" bucket that
+# breaks the close (July 2026: ~$48.6K sat untagged). Flag it the same hour it
+# posts so Joanne can fix it before month-end. Bills + Purchases only — those
+# are the cost-entry points; journal entries are downstream timing mechanics
+# (the deferral/reversal pairs) and would false-positive here.
+
+COGS_ACCOUNT_HINT = "cost of goods sold"
+UNTAGGED_COGS_AUDIENCE = ["matt", "joanne"]
+
+
+def _account_is_cogs(account_name: str) -> bool:
+    n = (account_name or "").strip()
+    return n[:1] == "5" or COGS_ACCOUNT_HINT in n.lower()
+
+
+def _expense_line_cogs_info(line: dict[str, Any]) -> tuple[str, bool, float] | None:
+    """(account_name, has_customer_job, amount) for a Bill/Purchase account line, else None."""
+    det = line.get("AccountBasedExpenseLineDetail")
+    if not isinstance(det, dict):
+        return None
+    acct = (det.get("AccountRef") or {}).get("name", "")
+    cust = det.get("CustomerRef") or {}
+    has_customer = bool(isinstance(cust, dict) and cust.get("value"))
+    try:
+        amt = float(line.get("Amount") or 0)
+    except (TypeError, ValueError):
+        amt = 0.0
+    return acct, has_customer, amt
+
+
+def _fetch_recent_cost_txns(last_checked_at: str | None) -> list[dict[str, Any]]:
+    """Bills + Purchases updated since last check (for the untagged-COGS scan)."""
+    where = _qbo_since_clause(last_checked_at)
+    out: list[dict[str, Any]] = []
+    for entity in ("Bill", "Purchase"):
+        try:
+            resp = qbo.qbo_query(f"SELECT * FROM {entity} {where} MAXRESULTS 500")
+        except qbo.QBOError:
+            continue
+        for row in (resp.get("QueryResponse") or {}).get(entity) or []:
+            row["_entity"] = entity
+            out.append(row)
+    return out
+
+
+def _check_untagged_cogs(txns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One consolidated 'important' finding listing every COGS line missing a job."""
+    offenders: list[dict[str, Any]] = []
+    for tx in txns:
+        for line in tx.get("Line") or []:
+            info = _expense_line_cogs_info(line)
+            if not info:
+                continue
+            acct, has_customer, amt = info
+            if _account_is_cogs(acct) and not has_customer and abs(amt) > 0:
+                offenders.append({
+                    "entity": tx.get("_entity"),
+                    "id": tx.get("Id"),
+                    "doc": tx.get("DocNumber") or tx.get("Id") or "",
+                    "account": acct,
+                    "amount": amt,
+                    "payee": _txn_vendor(tx),
+                    "date": _txn_date(tx),
+                })
+    if not offenders:
+        return []
+    total = sum(o["amount"] for o in offenders)
+    shown = [
+        f"  - {o['entity']} {o['doc']} ({o['date']}): ${o['amount']:,.2f} to "
+        f"{o['payee'] or 'unknown'} [{o['account']}] — no job"
+        for o in offenders[:15]
+    ]
+    more = f"\n  ... and {len(offenders) - 15} more" if len(offenders) > 15 else ""
+    return [{
+        "severity": "important",
+        "type": "untagged_cogs",
+        "details": {"count": len(offenders), "total": round(total, 2), "offenders": offenders[:50]},
+        "message": (
+            f"{len(offenders)} COGS line(s) booked with no customer:job — "
+            f"${total:,.2f} that will not hit any job's margin until tagged. "
+            f"Tag these to the job before close:\n" + "\n".join(shown) + more
+        ),
+        "audience_slack": UNTAGGED_COGS_AUDIENCE,
+    }]
+
+
 # --- Orchestration ---------------------------------------------------------
 
 
@@ -739,6 +831,18 @@ def run_watch(as_of: datetime | None = None) -> dict[str, Any]:
     # Evaluate
     findings = _run_per_transaction_rules(transactions, ctx)
     findings.extend(_run_global_rules(ctx))
+
+    # Untagged-COGS immediate check (Matt 2026-07: notify same hour to fix job tagging)
+    try:
+        cost_txns = _fetch_recent_cost_txns(last_checked_at)
+        findings.extend(_check_untagged_cogs(cost_txns))
+    except Exception as e:
+        findings.append({
+            "severity": "informational",
+            "type": "untagged_cogs_check_error",
+            "details": {"error": str(e)},
+            "message": f"Untagged-COGS check raised: {e}",
+        })
 
     # Bucket
     by_severity: dict[str, list[dict[str, Any]]] = {

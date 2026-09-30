@@ -8,9 +8,11 @@ assigned reps via the shared rep registry, generates:
 Read-only. Never writes to QBO. Never sends Slack directly — returns text
 payload that main.py / cron wires through slack_client.
 
-Defensive by design — early-stage QBO data is messy. Missing customer.SalesRep,
-missing custom fields, zero balances, empty AR, registry lookup failures all
-fall through to "unassigned" with a flag for Matt.
+Rep attribution: Base44 Relentless app first (Job.customer_name ->
+sales_rep_email — the system of record for job ownership), then QBO
+SalesRep/custom fields as fallback. Defensive by design — early-stage data is
+messy. Missing app match, missing QBO fields, zero balances, empty AR,
+registry lookup failures all fall through to "unassigned" with a flag for Matt.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from keystone import qbo, rep_mapping, voice
+from keystone import base44, qbo, rep_mapping, voice
 
 logger = logging.getLogger(__name__)
 
@@ -238,10 +240,30 @@ def _customer_rep_name(customer_id: str | None, customer_name: str) -> str | Non
     """Resolve the rep assigned to a QBO customer.
 
     Priority:
-      1. Customer.SalesRep (denormalized name string in QBO)
-      2. Customer.CustomField with name like "Sales Rep" / "Rep" / "Closer"
-      3. None — caller treats as "unassigned"
+      1. Base44 Relentless app — Job.sales_rep_email matched by customer name
+         (the forward-looking system of record for job ownership)
+      2. Customer.SalesRep (denormalized name string in QBO)
+      3. Customer.CustomField with name like "Sales Rep" / "Rep" / "Closer"
+      4. None — caller treats as "unassigned"
     """
+    # 1. Base44 app — authoritative going forward. Resolve the app's rep email
+    # to the canonical registry name so Slack ID lookup stays name-based.
+    try:
+        b44 = base44.rep_for_customer(customer_name)
+    except Exception as e:
+        logger.warning("Base44 rep lookup failed for %s: %s", customer_name, e)
+        b44 = None
+    if b44:
+        entry = (
+            rep_mapping.get_rep_by_email(b44["rep_email"])
+            if b44.get("rep_email")
+            else None
+        )
+        if entry and entry.get("name"):
+            return entry["name"]
+        if b44.get("rep_name"):
+            return b44["rep_name"]
+
     if not customer_id:
         return None
 
@@ -520,7 +542,8 @@ def _render_matt_message_template(summary: dict[str, Any], delta: dict[str, Any]
         lines.append("")
         lines.append(
             f"Unassigned: {_fmt_usd(unassigned)} across {unassigned_n} customers. "
-            "No SalesRep field or custom rep field populated in QBO — recommend Joanne tag these so the per-rep digest is complete next pull."
+            "No matching job with a sales rep in the Relentless app (Base44), and no rep field in QBO. "
+            "Recommend confirming these jobs exist in the app with a rep assigned — that is the system of record."
         )
         for name in summary["unassigned_customers"][:10]:
             cust = by_customer.get(name, {})

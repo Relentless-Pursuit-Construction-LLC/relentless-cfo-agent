@@ -188,12 +188,12 @@ Industry benchmark for residential window install "SG&A" (sales, general, admin)
 - Some UT customers have bought windows AND other projects from Relentless
 - **Window + roofing combined deals exist** — some financed under ONE loan, which makes attribution between the two trades hard. Keystone should help propose a cleaner way to track these.
 
-## GoHighLevel = source of truth for sales
+## Sightline is the source of truth for sales; GoHighLevel is retired
 
-- **GHL is the system of record for closers, customers, and opportunities**
-- **QBO is just for invoicing** — invoices flow from GHL → Matt's webhook service → QBO
-- This is why Customer.SalesRep is empty in QBO — the rep info lives in GHL, not QBO
-- **Keystone should cross-reference QBO and GHL** during audits to get full attribution
+- Matt confirmed GoHighLevel was cancelled on October 20, 2026. Do not query it or recommend using it.
+- Use verified Sightline contracts and rep assignments for sold volume and attribution. QuickBooks remains the accounting source for recognized revenue, invoices and payments.
+- The service historically named `relentless-ghl-agent` still supports active Sightline/QuickBooks functions; its name does not mean those functions should be shut down.
+- The old monthly report's sales-booked adapter is retired. Report that figure as unavailable until a verified Sightline adapter is connected; never treat missing GHL data as zero sales.
 
 ## Open items / things Keystone should always ask Matt or Josh about
 

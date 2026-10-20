@@ -122,44 +122,18 @@ def _extract_total_income(pl_report: dict[str, Any]) -> float:
 def _sales_booked_by_month(months: list[tuple[int, int]]) -> dict[tuple[int, int], dict[str, Any]]:
     """Sum Won-deal monetaryValue per month, keyed by (year, month).
 
-    Returns {(y,m): {"total": float, "count": int}}. Empty/zero if GHL not
-    configured or unreachable — the report degrades gracefully.
+    GHL is retired. Unavailable values must not be presented as zero sales.
     """
-    buckets: dict[tuple[int, int], dict[str, Any]] = {
-        (y, m): {"total": 0.0, "count": 0} for (y, m) in months
+    return {
+        (y, m): {"total": None, "count": None} for (y, m) in months
     }
-    if not ghl.is_configured():
-        return buckets
-    try:
-        opps = ghl.search_all_opportunities()
-    except Exception as e:
-        logger.warning("GHL fetch failed: %s", e)
-        return buckets
-
-    wanted = set(months)
-    for opp in opps:
-        if opp.get("status") != "won":
-            continue
-        # lastStatusChangeAt is the best proxy for "booked date"
-        ts = opp.get("lastStatusChangeAt") or opp.get("updatedAt") or opp.get("createdAt")
-        if not ts:
-            continue
-        try:
-            d = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).date()
-        except ValueError:
-            continue
-        key = (d.year, d.month)
-        if key in wanted:
-            buckets[key]["total"] += ghl.monetary_value(opp)
-            buckets[key]["count"] += 1
-    return buckets
 
 
 # --- Formatting ------------------------------------------------------------
 
 
-def _fmt(v: float) -> str:
-    return f"${v:,.0f}"
+def _fmt(v: float | None) -> str:
+    return "Unavailable" if v is None else f"${v:,.0f}"
 
 
 def _build_message(rows: list[dict[str, Any]], pull_ts_az: str) -> str:
@@ -167,7 +141,7 @@ def _build_message(rows: list[dict[str, Any]], pull_ts_az: str) -> str:
     L: list[str] = ["RELENTLESS — MONTHLY REVENUE TRACKER", ""]
     L.append("Three ways to count revenue, six months side by side:")
     L.append("")
-    L.append("  SALES BOOKED   = deals we closed (GoHighLevel)")
+    L.append("  SALES BOOKED   = unavailable — GoHighLevel retired; Sightline source not connected")
     L.append("  RECOGNIZED     = revenue earned/billed (QuickBooks P&L)")
     L.append("  CASH COLLECTED = money that hit the bank")
     L.append("")
@@ -184,7 +158,7 @@ def _build_message(rows: list[dict[str, Any]], pull_ts_az: str) -> str:
     L.append("")
 
     # Trend read on the most recent COMPLETE month vs the one before it.
-    if len(rows) >= 2:
+    if len(rows) >= 2 and all(r["sales_booked"] is not None for r in rows[-2:]):
         cur, prev = rows[-1], rows[-2]
         booked_delta = cur["sales_booked"] - prev["sales_booked"]
         direction = "up" if booked_delta >= 0 else "down"
@@ -197,10 +171,9 @@ def _build_message(rows: list[dict[str, Any]], pull_ts_az: str) -> str:
 
     L.append("")
     L.append(
-        "Note: SALES BOOKED comes from GoHighLevel (deals marked Won). "
-        "RECOGNIZED and CASH come from QuickBooks. The three differ because "
-        "we bill and collect on a delay from when we close — especially on "
-        "financed deals."
+        "Note: GoHighLevel is retired. SALES BOOKED is unavailable until a "
+        "verified Sightline source is connected; it is not zero. "
+        "RECOGNIZED and CASH continue to come from QuickBooks."
     )
 
     body = "\n".join(L)
@@ -243,8 +216,8 @@ def run_revenue_tracker(months_back: int = DEFAULT_MONTHS_BACK) -> dict[str, Any
             "label": _month_label(y, m),
             "year": y,
             "month": m,
-            "sales_booked": sales.get((y, m), {}).get("total", 0.0),
-            "sales_booked_count": sales.get((y, m), {}).get("count", 0),
+            "sales_booked": sales.get((y, m), {}).get("total"),
+            "sales_booked_count": sales.get((y, m), {}).get("count"),
             "recognized": recognized,
             "cash_collected": cash_collected,
         })
@@ -255,6 +228,7 @@ def run_revenue_tracker(months_back: int = DEFAULT_MONTHS_BACK) -> dict[str, Any
         "stats": {
             "months": rows,
             "ghl_configured": ghl.is_configured(),
+            "sales_booked_status": "unavailable_ghl_retired",
             "pull_timestamp_az": pull_ts_az,
         },
     }

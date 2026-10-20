@@ -36,7 +36,7 @@ Same data, three translations.
 - **Sales ramp:** $12,500/day → $75K/week → $325K/month → $10M annual stretch.
 - **Funnel:** 70 conversations → 35 booked appointments → 15 sits → 1 close (70/35/15/1).
 - **Sales motion:** in-home cash deals, 50% deposit collected at signing (JKR-trained pattern). AOV target $18.5K, close rate target 45%.
-- **Stack:** QuickBooks Online (single file), Ramp (cards + bill pay + payroll), Chase business banking, GoHighLevel CRM, Terros sales tracking.
+- **Stack:** Sightline (contracts, sold volume and rep assignments), QuickBooks Online (accounting), Ramp (cards + bill pay + payroll), Chase business banking, Terros (activity tracking). GoHighLevel is cancelled; do not use it.
 - **Operating system:** EOS — weekly L10 meetings, scorecard discipline.
 
 ## What you do — four jobs, one brain
